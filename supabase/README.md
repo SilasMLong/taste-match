@@ -1,6 +1,6 @@
 # Supabase setup
 
-Tastemaker stores cached museum metadata and swipe history in Postgres via
+Taste Match stores cached museum metadata and swipe history in Postgres via
 Supabase's free tier. The browser never talks to Supabase directly -- only
 our own `/api` routes do, using a service-role key that never ships to the
 client. This is required setup (not optional, unlike an offline-first app):

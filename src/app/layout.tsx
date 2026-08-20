@@ -3,7 +3,7 @@ import Link from "next/link";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tastemaker",
+  title: "Taste Match",
   description: "Build visual taste through repeated exposure to art.",
 };
 
@@ -21,7 +21,7 @@ export default function RootLayout({
               href="/"
               className="font-serif text-lg tracking-tight text-foreground"
             >
-              Tastemaker
+              Taste Match
             </Link>
             <nav className="flex items-center gap-6">
               <Link

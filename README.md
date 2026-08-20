@@ -1,4 +1,4 @@
-# Tastemaker
+# Taste Match
 
 Swipe left/right on museum artwork to build visual taste through repeated
 exposure. A swipe deck fed by cached Open Access images from four museums
