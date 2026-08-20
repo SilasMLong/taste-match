@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+:root {
+  --background: #faf9f7;
+  --surface: #ffffff;
+  --foreground: #1a1a18;
+  --muted: #8a8580;
+  --border: #e8e5e0;
+  --accent: #1a1a18;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
