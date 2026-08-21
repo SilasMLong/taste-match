@@ -89,6 +89,7 @@ export default function LikedWall() {
                 src={image.image_url}
                 alt={image.title}
                 loading="lazy"
+                referrerPolicy="no-referrer"
                 className="max-h-full max-w-full object-contain"
               />
             </div>

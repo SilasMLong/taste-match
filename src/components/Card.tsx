@@ -17,6 +17,13 @@ export default function Card({ image }: { image: ImageRecord }) {
           src={image.image_url}
           alt={image.title}
           draggable={false}
+          // The Art Institute of Chicago's image server 403s any request
+          // carrying a third-party Referer header -- verified live: 0/80
+          // sampled images loaded with a referrer present, 78/80 without
+          // one. Browsers send Referer by default on <img> loads, so this
+          // was silently breaking every AIC image (1,856 of them) until
+          // this was set.
+          referrerPolicy="no-referrer"
           className="max-h-full max-w-full select-none object-contain"
         />
       </div>

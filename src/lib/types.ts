@@ -5,7 +5,7 @@
 // Free text in the DB (see 0002_open_source_museum.sql) so adding another
 // source is a seed-script change, not a migration -- this union is just for
 // autocomplete/type-safety in code, same relationship Category has to its column.
-export type SourceMuseum = "smithsonian" | "met" | "artic" | "cleveland";
+export type SourceMuseum = "smithsonian" | "met" | "artic" | "cleveland" | "europeana";
 
 // Free text in the DB (not a Postgres enum), so adding a new category is a
 // seed-script change, not a migration -- see src/lib/categoryGroups.ts for

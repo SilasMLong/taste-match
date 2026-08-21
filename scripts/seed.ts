@@ -1,10 +1,11 @@
-// Populates the `images` table from four museum open-access APIs: Met,
-// Smithsonian, Art Institute of Chicago, and Cleveland Museum of Art. Run
-// once to get started, and again any time to pull in more -- it upserts on
-// (source_museum, external_id) so re-running never creates duplicates. See
-// supabase/README.md for the required env vars, and
-// supabase/migrations/0002_open_source_museum.sql (run once, before the
-// first artic/cleveland seed).
+// Populates the `images` table from five open-access APIs: Met, Smithsonian,
+// Art Institute of Chicago, Cleveland Museum of Art (fine art), and Europeana
+// (architecture + fashion -- see EUROPEANA_PROVIDERS below for why it's
+// scoped to just those two categories). Run once to get started, and again
+// any time to pull in more -- it upserts on (source_museum, external_id) so
+// re-running never creates duplicates. See supabase/README.md for the
+// required env vars, and supabase/migrations/0002_open_source_museum.sql
+// (run once, before the first artic/cleveland/europeana seed).
 //
 // Usage:
 //   npm run seed                       # all sources, default count
@@ -20,6 +21,7 @@ loadDotEnvLocal();
 const SUPABASE_URL = requireEnv("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 const SMITHSONIAN_API_KEY = process.env.SMITHSONIAN_API_KEY || "DEMO_KEY";
+const EUROPEANA_API_KEY = process.env.EUROPEANA_API_KEY || "";
 
 const args = parseArgs(process.argv.slice(2));
 const SOURCE = (args.source as SourceMuseum | "all") ?? "all";
@@ -42,6 +44,53 @@ const CATEGORY_TERMS: { category: Category; term: string; metMedium: string; pro
 // Art-focused Smithsonian units. Excludes e.g. natural history or the
 // libraries, which dominate a plain keyword search but aren't fine art.
 const SMITHSONIAN_ART_UNITS = ["SAAM", "NPG", "HMSG", "FSG"];
+
+// Europeana aggregates from thousands of institutions of wildly varying
+// metadata quality -- a plain keyword search returns messy, barely-tagged
+// records from ethnographic and regional-history collections. Scoping to
+// specific reputable DATA_PROVIDER values (found via Europeana's facet
+// endpoint) gets clean results, the same trick SMITHSONIAN_ART_UNITS plays
+// for Smithsonian's search.
+//
+// This is deliberately fine-art-free and limited to just two categories:
+// - Fine art: our four dedicated museum APIs already give deep, richly
+//   tagged coverage (creator, medium, classification all populated).
+//   Europeana's aggregated version of the *same* institutions (verified
+//   live against Rijksmuseum) is noticeably thinner -- no creator, no
+//   medium, generic titles -- so it isn't worth adding.
+// - Products: too thin and scattered to find a good provider (~1,100
+//   total results for "product design", no institution with real volume).
+// - Furniture: the one clearly dedicated source, Mobilier National
+//   Collections, has a fully broken image host (verified live: 10/10
+//   sampled image URLs 404, their site was restructured since Europeana's
+//   crawl) -- no working replacement found.
+// - Museum of Finnish Architecture was also tried and dropped: its image
+//   host 401s on every request (verified live), which looks like it needs
+//   an authentication Europeana's metadata doesn't give us.
+const EUROPEANA_PROVIDERS: { category: Category; providers: string[] }[] = [
+  {
+    category: "architecture",
+    providers: [
+      "Museum of Architecture at Berlin Institute of Technology",
+      "Swedish Centre for Architecture and Design",
+    ],
+  },
+  {
+    category: "fashion",
+    providers: ["Palais Galliera - Musée de la Mode de la Ville de Paris", "Fashion Museum of Antwerp"],
+  },
+];
+
+// reusability=open (the query-level filter) covers CC0, Public Domain Mark,
+// CC BY, and CC BY-SA -- but the latter two legally require attribution,
+// which nothing in this app displays. Rather than risk showing
+// attribution-required work with no attribution, only accept the two
+// license URIs that need none, checked per-record against the actual
+// `rights` field returned (not just trusted from the query filter).
+function isFullyOpenRights(rights: string | undefined): boolean {
+  if (!rights) return false;
+  return rights.includes("publicdomain/zero") || rights.includes("publicdomain/mark");
+}
 
 async function main() {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -87,6 +136,19 @@ async function main() {
       const batch = await fetchClevelandCategory(properType, category, PER_CATEGORY_TARGET);
       console.log(`[cleveland] "${properType}": ${batch.length} usable records`);
       records.push(...batch);
+    }
+  }
+
+  if (SOURCE === "europeana" || SOURCE === "all") {
+    if (!EUROPEANA_API_KEY) {
+      console.log("[europeana] EUROPEANA_API_KEY not set, skipping");
+    } else {
+      for (const { category, providers } of EUROPEANA_PROVIDERS) {
+        console.log(`[europeana] fetching "${category}" (target ${PER_CATEGORY_TARGET})...`);
+        const batch = await fetchEuropeanaCategory(category, providers, PER_CATEGORY_TARGET);
+        console.log(`[europeana] "${category}": ${batch.length} usable records`);
+        records.push(...batch);
+      }
     }
   }
 
@@ -468,6 +530,128 @@ function clevelandItemToRecord(
     // available tag-like signal.
     tags: item.department ? [item.department] : [],
   };
+}
+
+// ---------- Europeana ----------
+
+interface EuropeanaItem {
+  id: string;
+  title?: string[];
+  dcCreator?: string[];
+  year?: string[];
+  edmTimespanLabel?: { def?: string }[];
+  dctermsMedium?: string[];
+  country?: string[];
+  edmIsShownBy?: string[];
+  rights?: string[];
+  dcSubjectLangAware?: { def?: string[] };
+}
+
+async function fetchEuropeanaCategory(
+  category: Category,
+  providers: string[],
+  targetCount: number
+): Promise<NewImageRecord[]> {
+  const results: NewImageRecord[] = [];
+
+  for (const provider of providers) {
+    if (results.length >= targetCount) break;
+    // Cursor-based, not offset-based: Europeana hard-caps offset pagination
+    // at 1000 results ("It is not possible to paginate beyond the first
+    // 1000 search results") and explicitly names cursor pagination as the
+    // way around it -- verified live that it actually does go past 1000
+    // with zero duplicate ids across pages.
+    let cursor = "*";
+
+    while (results.length < targetCount) {
+      const params = new URLSearchParams({
+        wskey: EUROPEANA_API_KEY,
+        query: "*",
+        reusability: "open",
+        rows: "100",
+        cursor,
+      });
+      params.append("qf", "TYPE:IMAGE");
+      params.append("qf", `DATA_PROVIDER:"${provider}"`);
+
+      const res = await fetch(`https://api.europeana.eu/record/v2/search.json?${params.toString()}`);
+      if (!res.ok) {
+        console.warn(`[europeana] search failed for "${provider}": ${res.status}`);
+        break;
+      }
+      const data = (await res.json()) as { items?: EuropeanaItem[]; nextCursor?: string };
+      const batch = data.items ?? [];
+      if (batch.length === 0) break;
+
+      for (const item of batch) {
+        const record = europeanaItemToRecord(item, category);
+        if (record) results.push(record);
+        if (results.length >= targetCount) break;
+      }
+
+      if (!data.nextCursor) break;
+      cursor = data.nextCursor;
+      await sleep(150);
+    }
+  }
+
+  return results.slice(0, targetCount);
+}
+
+function europeanaItemToRecord(item: EuropeanaItem, category: Category): NewImageRecord | null {
+  const imageUrl = item.edmIsShownBy?.[0];
+  if (!imageUrl) return null;
+  // Belt-and-suspenders on top of the reusability=open query filter -- see
+  // the EUROPEANA_PROVIDERS comment for why CC BY/CC BY-SA (also "open")
+  // are deliberately excluded here.
+  if (!isFullyOpenRights(item.rights?.[0])) return null;
+
+  const title = item.title?.[0];
+  if (!title) return null;
+
+  // Europeana aggregates across many European languages -- "anonymous"
+  // shows up as "Anoniem" (Dutch), "Anonyme" (French), "Anonimo" (Italian/
+  // Spanish, sometimes with accent), "Unbekannt" (German), "Okänd"
+  // (Swedish), etc. Verified live: a plain English-only check let "Anonyme"
+  // through as if it were a real artist name.
+  const ANONYMOUS_PATTERN =
+    /^(anonymous|anoniem|anonyme|anonimo|an[oó]nimo|unbekannt|unknown|onbekend|ok[aä]nd)$/i;
+  const artist =
+    (item.dcCreator ?? [])
+      .filter((c) => !c.startsWith("http") && !ANONYMOUS_PATTERN.test(c.trim()))
+      .join(", ") || null;
+
+  const tags = Array.from(
+    new Set(
+      (item.dcSubjectLangAware?.def ?? []).filter((s) => !s.startsWith("http") && !s.startsWith("urn:"))
+    )
+  );
+
+  return {
+    external_id: item.id,
+    title,
+    artist,
+    date_period: item.year?.[0] ?? mostSpecificYear(item.edmTimespanLabel),
+    culture: item.country?.[0] ?? null,
+    medium: item.dctermsMedium?.[0] ?? null,
+    category,
+    source_museum: "europeana",
+    image_url: imageUrl,
+    tags,
+  };
+}
+
+// edmTimespanLabel is a list of increasingly specific date descriptions
+// (e.g. "Second millenium AD" -> "...years 1001-2000" -> "1689"); verified
+// against live samples that the most specific one -- usually a bare year --
+// comes last, so scan backwards for the first one that looks like a year.
+function mostSpecificYear(timespans: { def?: string }[] | undefined): string | null {
+  if (!timespans) return null;
+  for (let i = timespans.length - 1; i >= 0; i--) {
+    const def = timespans[i]?.def?.trim();
+    if (def && /^\d{3,4}$/.test(def)) return def;
+  }
+  return null;
 }
 
 // ---------- shared helpers ----------
