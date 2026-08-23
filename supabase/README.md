@@ -21,7 +21,10 @@ section. Then do the same with `supabase/migrations/0002_open_source_museum.sql`
 (one line -- drops a constraint that would otherwise reject the two newer
 sources below), and then `supabase/migrations/0003_deck_candidates.sql`
 (creates the `deck_candidates()` function `/api/deck` calls -- the deck
-returns an empty stack without it).
+returns an empty stack without it), and finally
+`supabase/migrations/0004_embeddings.sql` (adds the pgvector column and the
+`visual_candidates()` function V3 uses; the deck still works without it, just
+without visual similarity).
 
 ## 3. Get a Smithsonian Open Access API key
 

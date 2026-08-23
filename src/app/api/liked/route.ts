@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { toClientImage } from "@/lib/types";
 import type { ImageRecord } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
@@ -22,6 +23,9 @@ export async function GET(request: NextRequest) {
 
   const images = (data ?? [])
     .map((row) => row.images as unknown as ImageRecord)
-    .filter(Boolean);
+    .filter(Boolean)
+    // Same reason as /api/deck: the join pulls whole `images` rows, embedding
+    // column included, and that's ~10.6 KB of useless JSON per card.
+    .map(toClientImage);
   return NextResponse.json({ images });
 }

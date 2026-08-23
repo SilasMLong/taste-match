@@ -28,14 +28,17 @@ museum APIs are free.
 
 ```
 src/app/                 swipe deck ("/"), liked wall ("/liked"), taste profile ("/taste")
-src/app/api/deck         GET  -- a scored, weighted-random batch of unswiped images
+src/app/api/deck         GET  -- a scored batch of unswiped images (visual + random pools)
 src/app/api/swipes       POST -- log a like/pass, denormalizing tags/category/etc.
 src/app/api/liked        GET  -- this session's liked images, newest first
 src/app/api/profile      GET  -- this session's top favored/avoided tags
+src/app/api/image/[id]   GET  -- server-side image proxy; see image hosting gotchas
 src/components/          SwipeDeck (drag gesture + card stack), Card, LikedWall, TasteProfile
 src/lib/                 types.ts (schema), supabase.ts (server client), session.ts
 src/lib/recommend.ts     V2's scoring/selection layer -- see below
+src/lib/imageProxy.ts    which image hosts must route through the proxy, and why
 scripts/seed.ts          fetches + normalizes + upserts from all five source APIs
+scripts/embed.ts         V3's CLIP embedding backfill (resumable)
 supabase/migrations/     the actual SQL schema
 ```
 
@@ -153,8 +156,77 @@ dataset-wide base rate, and sculpture appeared at roughly half its 34.1%
 base rate -- enriched and suppressed in the right direction, neither at 0%
 nor 100%.
 
+## V3: visual similarity
+
+Tag overlap can only relate two pieces that share metadata. It cannot see that
+a Japanese woodblock print and a Chinese ink painting look alike, and it cannot
+rank Europeana's 2,000 architecture and fashion rows **at all** -- that source
+supplies no `tags` and no `medium`, so V2's profile has nothing to score them
+on beyond `culture`. V3 gives every image a CLIP embedding instead, which
+doesn't care how thin the metadata is.
+
+**Embeddings pick the candidates; V2 still ranks them.** `/api/deck` unions two
+pools and hands the combined set to the same `recommend.ts` scoring as before:
+
+- **Visual pool** (`visual_candidates()`, 150) -- unswiped images nearest, by
+  cosine distance, to the centroid of this session's most recent likes.
+- **Random pool** (`deck_candidates()`, 300) -- the uniform sample over the
+  whole corpus.
+
+The random pool isn't a fallback, it's a counterweight. A pure
+nearest-neighbour deck collapses: every like pulls the centroid tighter until
+the deck is showing one narrow look within a few dozen swipes. Keeping real
+random candidates in the mix is what preserves the "exposure builds taste"
+premise, and it's what the explore slice draws from.
+
+Cold start and partial backfill both degrade to plain V2: `visual_candidates()`
+returns nothing when the session has no embedded likes yet, and a failure there
+is logged rather than propagated, so the deck never goes down over it.
+
+### Generating the embeddings
+
+```bash
+npm run embed                        # everything still pending
+npm run embed -- --limit=200         # a subset, for a smoke test
+npm run embed -- --source=cleveland  # one source at a time
+npm run embed -- --retry-failed      # clear embedding_error and retry
+```
+
+`scripts/embed.ts` runs CLIP ViT-B/32 locally through transformers.js (ONNX,
+CPU) -- no hosted inference API, same no-paid-services constraint as the rest
+of this project. The first run downloads ~150 MB of model weights and then
+works offline.
+
+It is resumable by construction: the work queue is "rows where `embedding` is
+null and `embedding_error` is null", so interrupting it and re-running picks up
+exactly where it stopped. That matters, because a full pass downloads ~37,500
+images from museums that rate-limit -- expect hours, not minutes, and expect to
+run it more than once.
+
+Two things worth knowing if you touch this script:
+
+- It must not `import sharp` directly. transformers.js bundles its own libvips;
+  loading a second copy in one process produces an objc duplicate-class warning
+  that explicitly warns of "mysterious crashes". Decode via `RawImage.fromBlob`,
+  which uses the bundled copy.
+- Embeddings are L2-normalized before storage, because `visual_candidates()`
+  builds its query vector with `avg()` -- on unnormalized vectors a few
+  high-magnitude embeddings would dominate the centroid.
+
+### Storage
+
+512 dimensions x 4 bytes is ~2 KB a row, so ~77 MB across the corpus -- the
+largest single thing in this database against a 500 MB free tier. Call
+`table_sizes()` to check headroom. There is deliberately **no** ANN index: at
+37,593 rows an exact sequential scan is a few tens of milliseconds and has
+perfect recall, where HNSW would trade recall for a speedup this corpus doesn't
+need and spend storage that's already tight. Revisit past ~1M rows.
+
 ## Roadmap
 
-- **V3**: CLIP-embedding similarity to replace tag-overlap for "adjacent"
-  discovery, and for cases where two pieces look related but share no tags
-  at all.
+- **Products and Furniture** still have no source. Europeana's product pool was
+  too thin and scattered, and its one dedicated furniture provider (Mobilier
+  National) has dead image links. V&A, Cooper Hewitt, and Rijksmuseum's direct
+  API are researched but unbuilt.
+- **No accounts.** Everything is still keyed on an anonymous localStorage
+  session id.
