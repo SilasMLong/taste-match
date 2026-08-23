@@ -27,6 +27,9 @@ import {
   CLIPVisionModelWithProjection,
   RawImage,
 } from "@huggingface/transformers";
+import { loadDotEnvLocal } from "./env";
+
+loadDotEnvLocal();
 
 const MODEL_ID = "Xenova/clip-vit-base-patch32";
 // Identifies us honestly, and is what gets past the Anubis proof-of-work
@@ -37,12 +40,39 @@ const USER_AGENT = "TasteMatch/1.0 (+https://github.com/SilasMLong/taste-match)"
 // Downloads run concurrently; inference is serialized behind them. Kept low
 // deliberately: the Met throttles on cumulative request volume rather than
 // rate, so hammering it just moves the 403 earlier.
-const DOWNLOAD_CONCURRENCY = 6;
+const DOWNLOAD_CONCURRENCY = 10;
 const PAGE_SIZE = 500;
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 3;
+// After this many consecutive transient failures from one host, stop asking it
+// anything for the rest of the run. Without this, a host that is systematically
+// blocking us (AIC behind Cloudflare, say) costs the full retry backoff on
+// every single one of its rows -- 1,856 images x ~28s of sleeping is most of a
+// day spent waiting to be refused.
+const HOST_FAILURE_LIMIT = 8;
 
 type PendingRow = { id: string; image_url: string; source_museum: string };
+
+// Transient means "the image is probably fine, we were refused or timed out".
+// These deliberately do NOT get written to embedding_error: the row stays in
+// the pending queue so the next run retries it. Only permanent failures (a
+// genuine 404, an undecodable file) burn the row.
+class TransientError extends Error {}
+
+// CLIP resizes everything to 224x224, so downloading a 3000px original is
+// bandwidth spent to throw away. Hosts that expose a size in the URL get asked
+// for something just above 224; the rest are taken as they come.
+function thumbnailUrl(imageUrl: string): string {
+  // Art Institute of Chicago IIIF: .../full/843,/0/default.jpg
+  if (imageUrl.includes("/iiif/")) {
+    return imageUrl.replace(/\/full\/\d+,\//, "/full/336,/");
+  }
+  // Smithsonian: ...&max=800
+  if (imageUrl.includes("ids.si.edu")) {
+    return imageUrl.replace(/([?&]max=)\d+/, "$1336");
+  }
+  return imageUrl;
+}
 
 function arg(name: string): string | undefined {
   const hit = process.argv.slice(2).find((a) => a.startsWith(`--${name}`));
@@ -60,34 +90,41 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function download(row: PendingRow): Promise<Blob> {
   let lastError = "";
+  let transient = true;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const res = await fetch(row.image_url, {
+      const res = await fetch(thumbnailUrl(row.image_url), {
         headers: { "User-Agent": USER_AGENT, Accept: "image/*" },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         redirect: "follow",
       });
-      // 403/429 from the Met and AIC are throttling, not permanent failure --
-      // back off and retry rather than burning the row with an error.
+      // 403/429 from the Met and AIC is throttling, not a bad image. Retry a
+      // couple of times, briefly -- the circuit breaker in main() is what
+      // handles a host that's refusing everything.
       if (res.status === 403 || res.status === 429 || res.status >= 500) {
         lastError = `HTTP ${res.status}`;
-        await sleep(2000 * attempt * attempt);
+        if (attempt < MAX_ATTEMPTS) await sleep(1000 * attempt);
         continue;
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        transient = false;
+        throw new Error(`HTTP ${res.status}`);
+      }
       const type = res.headers.get("content-type") ?? "";
       // A 200 carrying HTML is a bot-protection interstitial, not an image.
       if (!type.startsWith("image/")) {
+        transient = false;
         throw new Error(`content-type ${type || "unknown"}, not an image`);
       }
       return await res.blob();
     } catch (err) {
+      if (err instanceof Error && !transient) throw err;
       lastError = err instanceof Error ? err.message : String(err);
       if (attempt === MAX_ATTEMPTS) break;
-      await sleep(1000 * attempt);
+      await sleep(500 * attempt);
     }
   }
-  throw new Error(lastError || "download failed");
+  throw new TransientError(lastError || "download failed");
 }
 
 // L2-normalizes before storage. Two reasons: cosine distance is then a plain
@@ -127,7 +164,21 @@ async function main() {
 
   let done = 0;
   let failed = 0;
+  let deferred = 0;
+  // Consecutive transient failures per host, and the hosts that have tripped
+  // the breaker. Rows belonging to a tripped host are left pending, not
+  // errored, so a later run picks them up once the block clears.
+  const hostFailures = new Map<string, number>();
+  const skippedHosts = new Set<string>();
   const startedAt = Date.now();
+
+  const hostOf = (url: string) => {
+    try {
+      return new URL(url).host;
+    } catch {
+      return "unknown";
+    }
+  };
 
   while (done + failed < limit) {
     let query = supabase
@@ -141,19 +192,44 @@ async function main() {
     const { data: rows, error } = await query;
     if (error) throw new Error(error.message);
     if (!rows || rows.length === 0) break;
+    // Every remaining row belongs to a host that's refusing us: nothing in this
+    // page can succeed, and the query would hand back the same page forever.
+    if (rows.every((r) => skippedHosts.has(hostOf(r.image_url)))) {
+      console.log("\n  all remaining hosts are skipped -- stopping");
+      break;
+    }
 
     for (let i = 0; i < rows.length && done + failed < limit; i += DOWNLOAD_CONCURRENCY) {
       const chunk = rows.slice(i, i + DOWNLOAD_CONCURRENCY) as PendingRow[];
 
       const fetched = await Promise.all(
         chunk.map(async (row) => {
+          const host = hostOf(row.image_url);
+          if (skippedHosts.has(host)) {
+            return { row, blob: null, error: null, transient: true };
+          }
           try {
-            return { row, blob: await download(row), error: null as string | null };
+            const blob = await download(row);
+            hostFailures.set(host, 0);
+            return { row, blob, error: null, transient: false };
           } catch (err) {
+            const transient = err instanceof TransientError;
+            if (transient) {
+              const n = (hostFailures.get(host) ?? 0) + 1;
+              hostFailures.set(host, n);
+              if (n >= HOST_FAILURE_LIMIT && !skippedHosts.has(host)) {
+                skippedHosts.add(host);
+                console.log(
+                  `\n  ${host} refused ${n} in a row -- skipping it for the rest of this run; ` +
+                    `those rows stay pending`
+                );
+              }
+            }
             return {
               row,
               blob: null,
               error: err instanceof Error ? err.message : String(err),
+              transient,
             };
           }
         })
@@ -164,11 +240,17 @@ async function main() {
       const updates: { id: string; embedding: string }[] = [];
       for (const item of fetched) {
         if (!item.blob) {
-          failed++;
-          await supabase
-            .from("images")
-            .update({ embedding_error: item.error?.slice(0, 300) })
-            .eq("id", item.row.id);
+          // Transient: leave the row pending so the next run retries it.
+          // Permanent: record why, so it stops occupying the queue.
+          if (item.transient) {
+            deferred++;
+          } else {
+            failed++;
+            await supabase
+              .from("images")
+              .update({ embedding_error: item.error?.slice(0, 300) })
+              .eq("id", item.row.id);
+          }
           continue;
         }
         try {
@@ -203,18 +285,24 @@ async function main() {
       const elapsed = (Date.now() - startedAt) / 1000;
       const rate = done / Math.max(elapsed, 1);
       process.stdout.write(
-        `\rembedded ${done}  failed ${failed}  ${rate.toFixed(1)}/s  ` +
+        `\rembedded ${done}  failed ${failed}  deferred ${deferred}  ${rate.toFixed(1)}/s  ` +
           `eta ${pending ? (((pending - done) / Math.max(rate, 0.01)) / 60).toFixed(0) : "?"}min   `
       );
     }
   }
 
   console.log(
-    `\n\ndone: ${done} embedded, ${failed} failed, ` +
-      `${((Date.now() - startedAt) / 60000).toFixed(1)} min`
+    `\n\ndone: ${done} embedded, ${failed} failed permanently, ` +
+      `${deferred} deferred, ${((Date.now() - startedAt) / 60000).toFixed(1)} min`
   );
+  if (deferred > 0) {
+    console.log(
+      `${deferred} rows were left pending (throttling or a tripped host) -- ` +
+        "just run `npm run embed` again to pick them up."
+    );
+  }
   if (failed > 0) {
-    console.log("re-run with --retry-failed to retry the failures.");
+    console.log("re-run with --retry-failed to retry the permanent failures.");
   }
 }
 
