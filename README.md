@@ -1,8 +1,9 @@
 # Taste Match
 
 Swipe left/right on museum artwork to build visual taste through repeated
-exposure. A swipe deck fed by cached Open Access images from four museums
-(Met, Smithsonian, Art Institute of Chicago, Cleveland Museum of Art), a
+exposure. A swipe deck fed by cached Open Access images from five sources
+(Met, Smithsonian, Art Institute of Chicago, Cleveland Museum of Art,
+Europeana), a
 "liked wall" of everything the current (anonymous) session has liked, and (as
 of V2) a deck that reorders itself around what you've actually liked, plus a
 "Your taste so far" page that shows the profile it's building. Still no
@@ -18,9 +19,9 @@ museum APIs are free.
 
 1. `npm install`
 2. Follow [`supabase/README.md`](supabase/README.md): create a free Supabase
-   project, run both migrations, get a Smithsonian API key, fill in `.env.local`.
-3. `npm run seed` -- pulls a starting batch of paintings/sculpture/prints from
-   all four museums into your Supabase `images` table.
+   project, run the migrations in order, get a Smithsonian API key, fill in `.env.local`.
+3. `npm run seed` -- pulls a starting batch of images from all five sources
+   into your Supabase `images` table.
 4. `npm run dev` -- open http://localhost:3000.
 
 ## How it's laid out
@@ -34,7 +35,7 @@ src/app/api/profile      GET  -- this session's top favored/avoided tags
 src/components/          SwipeDeck (drag gesture + card stack), Card, LikedWall, TasteProfile
 src/lib/                 types.ts (schema), supabase.ts (server client), session.ts
 src/lib/recommend.ts     V2's scoring/selection layer -- see below
-scripts/seed.ts          fetches + normalizes + upserts from all four museum APIs
+scripts/seed.ts          fetches + normalizes + upserts from all five source APIs
 supabase/migrations/     the actual SQL schema
 ```
 
@@ -45,9 +46,9 @@ script, not once per visitor.
 
 ## Data sources
 
-All four are CC0 / public domain, so nothing here costs money or needs
-attribution. `scripts/seed.ts` has one fetcher per source; `--source=` picks
-one, the default is all four.
+All five are CC0 / public domain (or the equivalent), so nothing here costs
+money or needs attribution. `scripts/seed.ts` has one fetcher per source;
+`--source=` picks one, the default is all five.
 
 | Source | Key needed | Notes |
 | --- | --- | --- |
@@ -55,6 +56,45 @@ one, the default is all four.
 | Smithsonian | yes, free (api.data.gov) | 1000 req/hour on a real key. Image URLs need `&max=` appended, not `?max=` -- their `content` field already has its own query string. |
 | Art Institute of Chicago | no | No published rate limit hit during seeding. Search is Elasticsearch-backed; filter one field per query (a two-field `term` filter 400s). |
 | Cleveland Museum of Art | no | Has direct `type=`/`cc0=`/`has_image=` query params, no query-DSL juggling needed. |
+| Europeana | yes, free | The only source for architecture and fashion so far. Hard-caps pagination at ~1000 results per query; use its documented cursor pagination to go past that. Supplies no `tags` and no `medium` at all -- see the scoring caveat below. |
+
+## Image hosting gotchas (read before debugging a blank card)
+
+Museum image hosts are not plain static file servers. Three of them apply
+access controls that fail in ways that look like broken data:
+
+- **Art Institute of Chicago 403s on a third-party `Referer`.** Browsers send
+  one by default on `<img>` loads, which silently broke all 1,856 AIC images.
+  Fixed by `referrerPolicy="no-referrer"` on the `<img>` tags in `Card.tsx`
+  and `LikedWall.tsx` -- don't remove it.
+- **AIC also sits behind Cloudflare.** Rapid automated requests earn a
+  `403` with a `Just a moment...` interstitial. This is IP-scoped and
+  temporary; it is not a data problem, and it clears on its own.
+- **`architekturmuseum.ub.tu-berlin.de` runs Anubis proof-of-work bot
+  protection**, and it hosts all 1,000 of the architecture images. It serves
+  the real JPEG to non-browser clients but returns an HTML challenge page
+  (`<title>Making sure you're not a bot!</title>`) to any request with a
+  browser User-Agent -- including the exact headers an `<img>` tag sends
+  (`Sec-Fetch-Dest: image`, `Accept: image/*`). An `<img>` cannot execute the
+  challenge's JavaScript, so these images can never load directly in a
+  browser. They are served through the image proxy route instead.
+
+**Do not conclude an image host is fine because `curl` fetched it.** The
+older advice here was to cross-check a "broken image" finding against curl
+from the dev machine, on the theory that sandboxed browsers get blocked where
+the real app works. That is backwards for UA-sniffing hosts: curl's default
+User-Agent sails past Anubis while every real browser is blocked, so curl
+returns a false negative and the sandboxed browser is the one telling the
+truth. Test with an explicit browser User-Agent before trusting the result:
+
+```bash
+curl -sS -o /dev/null -w "%{http_code} %{content_type}\n" \
+  -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36" \
+  "<image_url>"
+```
+
+A `content_type` of `text/html` on a URL that should be an image is the tell,
+even when the status is `200`.
 
 ## Data model, and why it's shaped this way
 

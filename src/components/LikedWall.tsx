@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { displayUrl } from "@/lib/imageProxy";
 import { getSessionId } from "@/lib/session";
 import type { ImageRecord } from "@/lib/types";
 
@@ -86,7 +87,7 @@ export default function LikedWall() {
             <div className="flex aspect-square items-center justify-center bg-[#f2f0ec] p-2">
               {/* eslint-disable-next-line @next/next/no-img-element -- external, unoptimized museum-hosted images */}
               <img
-                src={image.image_url}
+                src={displayUrl(image)}
                 alt={image.title}
                 loading="lazy"
                 referrerPolicy="no-referrer"

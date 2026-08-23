@@ -1,3 +1,4 @@
+import { displayUrl } from "@/lib/imageProxy";
 import type { ImageRecord } from "@/lib/types";
 
 function caption(image: ImageRecord): string {
@@ -14,7 +15,7 @@ export default function Card({ image }: { image: ImageRecord }) {
       <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-[#f2f0ec] p-4 sm:p-6">
         {/* eslint-disable-next-line @next/next/no-img-element -- external, unoptimized museum-hosted images */}
         <img
-          src={image.image_url}
+          src={displayUrl(image)}
           alt={image.title}
           draggable={false}
           // The Art Institute of Chicago's image server 403s any request
