@@ -19,7 +19,9 @@ contents of `supabase/migrations/0001_init.sql`, and run it. This creates the
 `images` and `swipes` tables described in the top-level README's data model
 section. Then do the same with `supabase/migrations/0002_open_source_museum.sql`
 (one line -- drops a constraint that would otherwise reject the two newer
-sources below).
+sources below), and then `supabase/migrations/0003_deck_candidates.sql`
+(creates the `deck_candidates()` function `/api/deck` calls -- the deck
+returns an empty stack without it).
 
 ## 3. Get a Smithsonian Open Access API key
 
