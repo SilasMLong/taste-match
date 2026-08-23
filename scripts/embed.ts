@@ -50,6 +50,14 @@ const MAX_ATTEMPTS = 3;
 // every single one of its rows -- 1,856 images x ~28s of sleeping is most of a
 // day spent waiting to be refused.
 const HOST_FAILURE_LIMIT = 8;
+// A tripped host is rested for this long, then tried again -- rate limiting is
+// something you wait out, not something that means the images are gone. The
+// first full run proved the distinction: it stopped at 15% with Smithsonian and
+// Cleveland "blocked", and both served images normally minutes later.
+const HOST_COOLDOWN_MS = 3 * 60_000;
+// ...but a host that keeps tripping after this many rests is genuinely refusing
+// us (AIC behind Cloudflare), so stop spending the run's time on it.
+const HOST_MAX_TRIPS = 3;
 
 type PendingRow = { id: string; image_url: string; source_museum: string };
 
@@ -165,11 +173,20 @@ async function main() {
   let done = 0;
   let failed = 0;
   let deferred = 0;
-  // Consecutive transient failures per host, and the hosts that have tripped
-  // the breaker. Rows belonging to a tripped host are left pending, not
-  // errored, so a later run picks them up once the block clears.
-  const hostFailures = new Map<string, number>();
-  const skippedHosts = new Set<string>();
+  // Per-host breaker state. Rows belonging to a resting or dead host are left
+  // pending, never errored, so nothing is lost either way.
+  type HostState = { consecutive: number; trips: number; restingUntil: number };
+  const hosts = new Map<string, HostState>();
+  const stateOf = (host: string): HostState => {
+    let st = hosts.get(host);
+    if (!st) {
+      st = { consecutive: 0, trips: 0, restingUntil: 0 };
+      hosts.set(host, st);
+    }
+    return st;
+  };
+  const isResting = (host: string) => Date.now() < stateOf(host).restingUntil;
+  const isDead = (host: string) => stateOf(host).trips >= HOST_MAX_TRIPS;
   const startedAt = Date.now();
 
   const hostOf = (url: string) => {
@@ -192,11 +209,29 @@ async function main() {
     const { data: rows, error } = await query;
     if (error) throw new Error(error.message);
     if (!rows || rows.length === 0) break;
-    // Every remaining row belongs to a host that's refusing us: nothing in this
-    // page can succeed, and the query would hand back the same page forever.
-    if (rows.every((r) => skippedHosts.has(hostOf(r.image_url)))) {
-      console.log("\n  all remaining hosts are skipped -- stopping");
-      break;
+    // Nothing in this page can succeed right now, and the query would hand back
+    // the same page forever. If it's only cooldowns, wait for the earliest one
+    // to expire; if every host left is dead, there is no more work to do.
+    const blocked = rows.filter(
+      (r) => isResting(hostOf(r.image_url)) || isDead(hostOf(r.image_url))
+    );
+    if (blocked.length === rows.length) {
+      const wakeAt = Math.min(
+        ...rows
+          .map((r) => stateOf(hostOf(r.image_url)))
+          .filter((st) => st.trips < HOST_MAX_TRIPS)
+          .map((st) => st.restingUntil)
+      );
+      if (!Number.isFinite(wakeAt)) {
+        console.log("\n  every remaining host is refusing us -- stopping");
+        break;
+      }
+      const waitMs = Math.max(wakeAt - Date.now(), 0) + 1000;
+      console.log(
+        `\n  all remaining hosts are resting -- waiting ${(waitMs / 1000).toFixed(0)}s`
+      );
+      await sleep(waitMs);
+      continue;
     }
 
     for (let i = 0; i < rows.length && done + failed < limit; i += DOWNLOAD_CONCURRENCY) {
@@ -205,23 +240,27 @@ async function main() {
       const fetched = await Promise.all(
         chunk.map(async (row) => {
           const host = hostOf(row.image_url);
-          if (skippedHosts.has(host)) {
+          if (isResting(host) || isDead(host)) {
             return { row, blob: null, error: null, transient: true };
           }
           try {
             const blob = await download(row);
-            hostFailures.set(host, 0);
+            stateOf(host).consecutive = 0;
             return { row, blob, error: null, transient: false };
           } catch (err) {
             const transient = err instanceof TransientError;
             if (transient) {
-              const n = (hostFailures.get(host) ?? 0) + 1;
-              hostFailures.set(host, n);
-              if (n >= HOST_FAILURE_LIMIT && !skippedHosts.has(host)) {
-                skippedHosts.add(host);
+              const st = stateOf(host);
+              st.consecutive += 1;
+              if (st.consecutive >= HOST_FAILURE_LIMIT) {
+                st.consecutive = 0;
+                st.trips += 1;
+                st.restingUntil = Date.now() + HOST_COOLDOWN_MS;
                 console.log(
-                  `\n  ${host} refused ${n} in a row -- skipping it for the rest of this run; ` +
-                    `those rows stay pending`
+                  st.trips >= HOST_MAX_TRIPS
+                    ? `\n  ${host} refused us after ${st.trips} rests -- giving up on it this run`
+                    : `\n  ${host} is rate limiting -- resting it for ${HOST_COOLDOWN_MS / 60000} min ` +
+                        `(rest ${st.trips}/${HOST_MAX_TRIPS})`
                 );
               }
             }
