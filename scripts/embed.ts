@@ -197,18 +197,35 @@ async function main() {
     }
   };
 
+  // Offset into the pending queue. Normally 0 -- embedded rows leave the queue,
+  // so the front keeps refilling with fresh work. It only advances to step over
+  // a page that is entirely dead-hosted, which is otherwise fatal: the queue
+  // comes back in physical scan order, and AIC's 1,856 Cloudflare-blocked rows
+  // sit at the front of it. A page-zero-only read saw 500/500 dead hosts and
+  // concluded the whole run was finished, with 30,000 fetchable rows behind them.
+  let offset = 0;
+  let wraps = 0;
+
   while (done + failed < limit) {
     let query = supabase
       .from("images")
       .select("id, image_url, source_museum")
       .is("embedding", null)
       .is("embedding_error", null)
-      .limit(PAGE_SIZE);
+      .range(offset, offset + PAGE_SIZE - 1);
     if (source) query = query.eq("source_museum", source);
 
     const { data: rows, error } = await query;
     if (error) throw new Error(error.message);
-    if (!rows || rows.length === 0) break;
+    if (!rows || rows.length === 0) {
+      if (offset === 0) break; // genuinely nothing left pending
+      // Walked off the end while stepping over dead pages. Start again from the
+      // front, where rows freed up by this pass now are.
+      offset = 0;
+      wraps += 1;
+      if (wraps > 2) break;
+      continue;
+    }
     // Nothing in this page can succeed right now, and the query would hand back
     // the same page forever. If it's only cooldowns, wait for the earliest one
     // to expire; if every host left is dead, there is no more work to do.
@@ -223,8 +240,10 @@ async function main() {
           .map((st) => st.restingUntil)
       );
       if (!Number.isFinite(wakeAt)) {
-        console.log("\n  every remaining host is refusing us -- stopping");
-        break;
+        // This page is all dead hosts. Step over it rather than concluding the
+        // run is done -- live rows may well be sitting behind it.
+        offset += PAGE_SIZE;
+        continue;
       }
       const waitMs = Math.max(wakeAt - Date.now(), 0) + 1000;
       console.log(
@@ -320,6 +339,11 @@ async function main() {
         )
       );
       done += updates.length;
+      if (updates.length > 0) {
+        // Made progress, so the front of the queue is worth reading again.
+        offset = 0;
+        wraps = 0;
+      }
 
       const elapsed = (Date.now() - startedAt) / 1000;
       const rate = done / Math.max(elapsed, 1);
