@@ -213,6 +213,31 @@ Two things worth knowing if you touch this script:
   builds its query vector with `avg()` -- on unnormalized vectors a few
   high-magnitude embeddings would dominate the centroid.
 
+### Coverage as of the first full backfill
+
+35,334 of 37,593 images embedded (94.0%), in ~74 minutes at ~6.7 images/sec.
+Smithsonian, Cleveland, Met and Europeana are complete. The gaps:
+
+- **AIC: 0 of 1,856.** `artic.edu` is behind Cloudflare and returns
+  `403 text/html` to every request from the machine that ran the backfill --
+  a block that IP earned by making thousands of requests. The rows are left
+  *pending*, not errored, so `npm run embed` collects them whenever the block
+  ages out. Nothing else is needed.
+- **403 permanent failures**, all Smithsonian `HTTP 404` -- image URLs that
+  are genuinely dead in their catalogue. `--retry-failed` will re-attempt them
+  but they are not expected to come back.
+
+Measured quality at full coverage: anchoring on two Chinese ink handscrolls
+returns six East Asian handscroll paintings (Japanese Edo, Muromachi, Chinese
+Yuan), four of them tagged `["Japanese Art"]` against anchors tagged
+`["Chinese Art"]` -- no tag overlap, so V2 could not have found them. Anchoring
+on two architectural drawings returns six more architectural drawings, all with
+**empty** `tags` arrays, which is the case V2 had nothing whatsoever to rank on.
+
+The same test at 2.3% coverage returned a Halloween print and a nude study in
+the same top six, so treat similarity quality as a function of coverage rather
+than a fixed property.
+
 ### Storage
 
 512 dimensions x 4 bytes is ~2 KB a row, so ~77 MB across the corpus -- the
