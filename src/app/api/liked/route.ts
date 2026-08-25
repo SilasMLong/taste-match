@@ -1,14 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withoutHiddenSources } from "@/lib/hiddenSources";
+import { getViewer } from "@/lib/viewer";
 import { toClientImage } from "@/lib/types";
 import type { ImageRecord } from "@/lib/types";
 
-export async function GET(request: NextRequest) {
-  const userId = request.nextUrl.searchParams.get("user_id");
-  if (!userId) {
-    return NextResponse.json({ error: "user_id is required" }, { status: 400 });
-  }
+export async function GET() {
+  const { userId } = await getViewer();
 
   const supabase = supabaseAdmin();
   const { data, error } = await supabase

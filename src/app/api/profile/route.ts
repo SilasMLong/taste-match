@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { fetchAllRows, supabaseAdmin } from "@/lib/supabase";
 import { computeProfile, topEntries } from "@/lib/recommend";
+import { getViewer } from "@/lib/viewer";
 import type { SwipeRecord } from "@/lib/types";
 
 const TOP_N = 8;
@@ -10,11 +11,8 @@ type ProfileSwipe = Pick<
   "liked" | "category" | "culture" | "medium" | "tags"
 >;
 
-export async function GET(request: NextRequest) {
-  const userId = request.nextUrl.searchParams.get("user_id");
-  if (!userId) {
-    return NextResponse.json({ error: "user_id is required" }, { status: 400 });
-  }
+export async function GET() {
+  const { userId } = await getViewer();
 
   const supabase = supabaseAdmin();
   // Paged for the same reason /api/deck pages: PostgREST caps responses at

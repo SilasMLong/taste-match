@@ -3,6 +3,7 @@ import { fetchAllRows, supabaseAdmin } from "@/lib/supabase";
 import { buildDeck, computeProfile } from "@/lib/recommend";
 import { categoriesForGroup } from "@/lib/categoryGroups";
 import { withoutHiddenSources } from "@/lib/hiddenSources";
+import { getViewer } from "@/lib/viewer";
 import { toClientImage } from "@/lib/types";
 import type { ImageRecord, SwipeRecord } from "@/lib/types";
 
@@ -39,10 +40,11 @@ type ProfileSwipe = Pick<
 >;
 
 export async function GET(request: NextRequest) {
-  const userId = request.nextUrl.searchParams.get("user_id");
-  if (!userId) {
-    return NextResponse.json({ error: "user_id is required" }, { status: 400 });
-  }
+  // Identity comes from the server, never from the request. A `user_id`
+  // parameter is ignored rather than honoured as a fallback -- accepting one
+  // would leave the hole this is closing.
+  const { userId } = await getViewer();
+
   const limit = Math.min(
     Number(request.nextUrl.searchParams.get("limit")) || DEFAULT_LIMIT,
     50

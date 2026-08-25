@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { motion, useMotionValue, useTransform, animate } from "framer-motion";
 import Card from "./Card";
 import { displayUrl } from "@/lib/imageProxy";
-import { getSessionId } from "@/lib/session";
 import { CATEGORY_GROUPS, type CategoryGroup } from "@/lib/categoryGroups";
 import type { ImageRecord } from "@/lib/types";
 import Loader from "./Loader";
@@ -22,8 +21,9 @@ const PRELOAD_AHEAD = 4;
 
 type PendingAction = "like" | "pass" | null;
 
-async function fetchDeck(userId: string, group: CategoryGroup | null): Promise<ImageRecord[]> {
-  const params = new URLSearchParams({ user_id: userId, limit: String(FETCH_LIMIT) });
+// No user_id: the server identifies the viewer from its own cookie.
+async function fetchDeck(group: CategoryGroup | null): Promise<ImageRecord[]> {
+  const params = new URLSearchParams({ limit: String(FETCH_LIMIT) });
   if (group) params.set("category_group", group);
   const res = await fetch(`/api/deck?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to load deck");
@@ -31,11 +31,11 @@ async function fetchDeck(userId: string, group: CategoryGroup | null): Promise<I
   return data.images as ImageRecord[];
 }
 
-function logSwipe(userId: string, imageId: string, liked: boolean) {
+function logSwipe(imageId: string, liked: boolean) {
   fetch("/api/swipes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_id: userId, image_id: imageId, liked }),
+    body: JSON.stringify({ image_id: imageId, liked }),
   }).catch(() => {
     // Best-effort: a dropped swipe just means that card won't count toward
     // a future session's recommendations. Not worth blocking or retrying in V1.
@@ -118,14 +118,9 @@ export default function SwipeDeck() {
   // null = the unfiltered "all categories" state -- no bubble highlighted.
   const [selectedGroup, setSelectedGroup] = useState<CategoryGroup | null>(null);
   const seenIds = useRef<Set<string>>(new Set());
-  // Not component state: it's never part of the rendered output, only read
-  // imperatively for API calls, so it doesn't belong in useState.
-  const sessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const id = getSessionId();
-    sessionIdRef.current = id;
-    fetchDeck(id, selectedGroup)
+    fetchDeck(selectedGroup)
       .then((images) => {
         images.forEach((img) => seenIds.current.add(img.id));
         setDeck(images);
@@ -135,9 +130,8 @@ export default function SwipeDeck() {
   }, [selectedGroup]);
 
   useEffect(() => {
-    const id = sessionIdRef.current;
-    if (!id || status !== "ready" || deck.length >= REFETCH_WHEN_BELOW) return;
-    fetchDeck(id, selectedGroup)
+    if (status !== "ready" || deck.length >= REFETCH_WHEN_BELOW) return;
+    fetchDeck(selectedGroup)
       .then((images) => {
         const fresh = images.filter((img) => !seenIds.current.has(img.id));
         fresh.forEach((img) => seenIds.current.add(img.id));
@@ -150,9 +144,8 @@ export default function SwipeDeck() {
 
   const handleSwiped = (liked: boolean) => {
     const top = deck[0];
-    const id = sessionIdRef.current;
-    if (!top || !id) return;
-    logSwipe(id, top.id, liked);
+    if (!top) return;
+    logSwipe(top.id, liked);
     setDeck((prev) => prev.slice(1));
     setPendingAction(null);
   };

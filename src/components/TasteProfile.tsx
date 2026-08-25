@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSessionId } from "@/lib/session";
 import Loader from "./Loader";
 
 type Entry = [string, number];
@@ -20,8 +19,7 @@ export default function TasteProfile() {
   const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
-    const id = getSessionId();
-    fetch(`/api/profile?user_id=${id}`)
+    fetch("/api/profile")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load taste profile");
         return res.json();

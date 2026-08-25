@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { displayUrl } from "@/lib/imageProxy";
-import { getSessionId } from "@/lib/session";
 import type { ImageRecord } from "@/lib/types";
 import Loader from "./Loader";
 
@@ -14,8 +13,7 @@ export default function LikedWall() {
   const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
-    const id = getSessionId();
-    fetch(`/api/liked?user_id=${id}`)
+    fetch("/api/liked")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load liked wall");
         return res.json();
@@ -51,7 +49,7 @@ export default function LikedWall() {
     fetch("/api/swipes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: getSessionId(), image_id: imageId, liked: false }),
+      body: JSON.stringify({ image_id: imageId, liked: false }),
     }).catch(() => {
       // Best-effort, matching swipe logging: worst case it reappears on the
       // next reload rather than leaving the wall stuck mid-removal.

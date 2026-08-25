@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getViewer } from "@/lib/viewer";
 import type { ImageRecord } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { user_id, image_id, liked } = body ?? {};
+  const { image_id, liked } = body ?? {};
 
-  if (typeof user_id !== "string" || !user_id) {
-    return NextResponse.json({ error: "user_id is required" }, { status: 400 });
-  }
+  // Whose swipe this is comes from the server. A `user_id` in the body is
+  // ignored -- honouring it would let anyone write into another person's
+  // history.
+  const { userId } = await getViewer();
+
   if (typeof image_id !== "string" || !image_id) {
     return NextResponse.json({ error: "image_id is required" }, { status: 400 });
   }
@@ -33,7 +36,7 @@ export async function POST(request: NextRequest) {
     .from("swipes")
     .upsert(
       {
-        user_id,
+        user_id: userId,
         image_id,
         liked,
         category: image.category,
