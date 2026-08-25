@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { displayUrl } from "@/lib/imageProxy";
 import { getSessionId } from "@/lib/session";
 import type { ImageRecord } from "@/lib/types";
+import Loader from "./Loader";
 
 type Status = "loading" | "ready" | "error";
 
@@ -29,7 +30,7 @@ export default function LikedWall() {
   if (status === "loading") {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted">Loading your wall…</p>
+        <Loader />
       </div>
     );
   }

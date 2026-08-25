@@ -7,6 +7,10 @@
   --muted: #8a8580;
   --border: #e8e5e0;
   --accent: #1a1a18;
+  /* The one warm accent in an otherwise near-monochrome palette, used by the
+     loading spinner. Defined here rather than inline so the colour lives in one
+     place like every other token. */
+  --brass: #c9a84c;
 }
 
 @theme inline {
@@ -16,6 +20,7 @@
   --color-muted: var(--muted);
   --color-border: var(--border);
   --color-accent: var(--accent);
+  --color-brass: var(--brass);
   --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
 }

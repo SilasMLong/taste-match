@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSessionId } from "@/lib/session";
+import Loader from "./Loader";
 
 type Entry = [string, number];
 
@@ -35,7 +36,7 @@ export default function TasteProfile() {
   if (status === "loading") {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted">Reading your taste…</p>
+        <Loader />
       </div>
     );
   }

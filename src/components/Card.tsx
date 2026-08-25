@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Loader from "./Loader";
 import { displayUrl } from "@/lib/imageProxy";
 import type { ImageRecord } from "@/lib/types";
 
@@ -29,10 +30,7 @@ export default function Card({ image }: { image: ImageRecord }) {
         {state !== "loaded" && (
           <div className="absolute inset-0 flex items-center justify-center px-6">
             {state === "loading" ? (
-              <div
-                className="h-10 w-10 animate-pulse rounded-full bg-border/70"
-                aria-label="Loading image"
-              />
+              <Loader showLabel={false} label="Loading image" />
             ) : (
               <p className="text-center text-xs leading-relaxed text-muted">
                 Image unavailable

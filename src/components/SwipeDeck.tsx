@@ -7,6 +7,7 @@ import { displayUrl } from "@/lib/imageProxy";
 import { getSessionId } from "@/lib/session";
 import { CATEGORY_GROUPS, type CategoryGroup } from "@/lib/categoryGroups";
 import type { ImageRecord } from "@/lib/types";
+import Loader from "./Loader";
 
 const SWIPE_THRESHOLD = 120;
 const VELOCITY_THRESHOLD = 500;
@@ -215,7 +216,7 @@ export default function SwipeDeck() {
       <div className="flex flex-1 flex-col">
         {groupBubbles}
         <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-muted">Loading the gallery…</p>
+          <Loader />
         </div>
       </div>
     );
