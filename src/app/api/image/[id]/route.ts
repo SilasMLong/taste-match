@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabase";
 import { isProxiedHost } from "@/lib/imageProxy";
+import { getCachedImage, setCachedImage } from "@/lib/imageCache";
 
 // Serves museum images that the browser can't or shouldn't fetch directly.
 // See src/lib/imageProxy.ts for which hosts route through here and why.
@@ -32,6 +33,20 @@ export async function GET(
   const { id } = await ctx.params;
   if (!UUID_RE.test(id)) {
     return NextResponse.json({ error: "invalid image id" }, { status: 400 });
+  }
+
+  // Before the database round-trip: a hit here skips the museum fetch and the
+  // sharp re-encode entirely, which is the whole 1-4 seconds.
+  const cached = getCachedImage(id);
+  if (cached) {
+    return new NextResponse(new Uint8Array(cached.body), {
+      headers: {
+        "Content-Type": cached.contentType,
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Content-Length": String(cached.body.byteLength),
+        "X-Image-Cache": "hit",
+      },
+    });
   }
 
   const { data: image, error } = await supabaseAdmin()
@@ -113,6 +128,8 @@ export async function GET(
     contentType = upstreamType;
   }
 
+  setCachedImage(id, { body, contentType });
+
   return new NextResponse(new Uint8Array(body), {
     headers: {
       "Content-Type": contentType,
@@ -120,6 +137,7 @@ export async function GET(
       // cache hard. It's also what keeps the proxy's bandwidth cost bounded.
       "Cache-Control": "public, max-age=31536000, immutable",
       "Content-Length": String(body.byteLength),
+      "X-Image-Cache": "miss",
     },
   });
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, useMotionValue, useTransform, animate } from "framer-motion";
 import Card from "./Card";
+import { displayUrl } from "@/lib/imageProxy";
 import { getSessionId } from "@/lib/session";
 import { CATEGORY_GROUPS, type CategoryGroup } from "@/lib/categoryGroups";
 import type { ImageRecord } from "@/lib/types";
@@ -12,6 +13,11 @@ const VELOCITY_THRESHOLD = 500;
 const REFETCH_WHEN_BELOW = 5;
 const FETCH_LIMIT = 20;
 const STACK_DEPTH = 3;
+// Only the three stacked cards have <img> tags in the DOM, so the fourth card's
+// image doesn't begin loading until it enters the stack -- and proxied
+// architecture images take a second or more to arrive. Warming the next few
+// means the browser already holds them by the time they're shown.
+const PRELOAD_AHEAD = 4;
 
 type PendingAction = "like" | "pass" | null;
 
@@ -193,6 +199,16 @@ export default function SwipeDeck() {
       })}
     </div>
   );
+
+  // Fire-and-forget: the browser caches the response, so the <img> that renders
+  // later hits cache rather than the network. Nothing reads these objects.
+  useEffect(() => {
+    for (const image of deck.slice(STACK_DEPTH, STACK_DEPTH + PRELOAD_AHEAD)) {
+      const preloader = new window.Image();
+      preloader.referrerPolicy = "no-referrer";
+      preloader.src = displayUrl(image);
+    }
+  }, [deck]);
 
   if (status === "loading") {
     return (
