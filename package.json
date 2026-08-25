@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts",
-    "embed": "tsx scripts/embed.ts"
+    "embed": "tsx scripts/embed.ts",
+    "pending": "tsx scripts/pending.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

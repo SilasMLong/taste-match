@@ -70,9 +70,18 @@ access controls that fail in ways that look like broken data:
   one by default on `<img>` loads, which silently broke all 1,856 AIC images.
   Fixed by `referrerPolicy="no-referrer"` on the `<img>` tags in `Card.tsx`
   and `LikedWall.tsx` -- don't remove it.
-- **AIC also sits behind Cloudflare.** Rapid automated requests earn a
-  `403` with a `Just a moment...` interstitial. This is IP-scoped and
-  temporary; it is not a data problem, and it clears on its own.
+- **AIC also sits behind Cloudflare, and it escalates.** Rapid automated
+  requests first earn a `403` with a `Just a moment...` interstitial
+  (`cf-mitigated: challenge`), which is IP-scoped and clears on its own. Keep
+  going and it stops being a challenge: the V3 embedding backfill made enough
+  requests to get this project's dev machine **blocked from `artic.edu`
+  outright**. A real browser on that IP gets Cloudflare's "Sorry, you have been
+  blocked" page for the whole domain, not just images, and it had not lifted
+  after 24 hours. Note what this rules out: the image proxy cannot rescue these,
+  because the server making the proxied fetch has the same IP as everything
+  else. The remedies are to wait, to run from a different network, or to email
+  the site owner as the block page suggests -- and to keep the crawl gentle
+  enough not to earn it again. Visitors on other networks are unaffected.
 - **`architekturmuseum.ub.tu-berlin.de` runs Anubis proof-of-work bot
   protection**, and it hosts all 1,000 of the architecture images. It serves
   the real JPEG to non-browser clients but returns an HTML challenge page
@@ -98,6 +107,23 @@ curl -sS -o /dev/null -w "%{http_code} %{content_type}\n" \
 
 A `content_type` of `text/html` on a URL that should be an image is the tell,
 even when the status is `200`.
+
+### Hiding a source you can't reach
+
+`HIDDEN_SOURCES` (in `.env.local`, comma-separated `source_museum` values) omits
+a source from the deck and the liked wall:
+
+```
+HIDDEN_SOURCES=artic
+```
+
+It is an environment setting rather than a code constant deliberately. An
+unreachable image host is usually a property of one network's IP reputation, not
+of the data -- AIC's 1,856 images load perfectly well for anyone whose IP
+Cloudflare hasn't flagged. Hard-coding the exclusion would degrade the site for
+every visitor in order to fix one machine, so the workaround lives in the
+gitignored env file, where the problem actually is. Remove the line when the
+block lifts.
 
 ## Data model, and why it's shaped this way
 

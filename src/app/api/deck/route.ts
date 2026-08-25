@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { fetchAllRows, supabaseAdmin } from "@/lib/supabase";
 import { buildDeck, computeProfile } from "@/lib/recommend";
 import { categoriesForGroup } from "@/lib/categoryGroups";
+import { withoutHiddenSources } from "@/lib/hiddenSources";
 import { toClientImage } from "@/lib/types";
 import type { ImageRecord, SwipeRecord } from "@/lib/types";
 
@@ -100,6 +101,12 @@ export async function GET(request: NextRequest) {
   for (const img of (visualPool.data ?? []) as ImageRecord[]) byId.set(img.id, img);
   for (const img of (randomPool.data ?? []) as ImageRecord[]) byId.set(img.id, img);
 
-  const deck = buildDeck([...byId.values()], profile, limit);
+  // Filtered here rather than inside the SQL functions: HIDDEN_SOURCES is a
+  // per-deployment workaround for an unreachable image host, not a property of
+  // the data, and pushing it into the schema would mean a migration every time
+  // one machine's network changes. The cost is that hidden rows still occupy
+  // pool slots -- negligible while the list is one source out of five.
+  const candidates = withoutHiddenSources([...byId.values()]);
+  const deck = buildDeck(candidates, profile, limit);
   return NextResponse.json({ images: deck.map(toClientImage) });
 }
