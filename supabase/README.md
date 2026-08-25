@@ -24,7 +24,8 @@ sources below), and then `supabase/migrations/0003_deck_candidates.sql`
 returns an empty stack without it), and finally
 `supabase/migrations/0004_embeddings.sql` (adds the pgvector column and the
 `visual_candidates()` function V3 uses; the deck still works without it, just
-without visual similarity).
+without visual similarity), and `supabase/migrations/0005_skip_dead_images.sql`
+(stops images with known-dead URLs being dealt into the deck).
 
 ## 3. Get a Smithsonian Open Access API key
 

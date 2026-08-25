@@ -251,7 +251,11 @@ Smithsonian, Cleveland, Met and Europeana are complete. The gaps:
   ages out. Nothing else is needed.
 - **403 permanent failures**, all Smithsonian `HTTP 404` -- image URLs that
   are genuinely dead in their catalogue. `--retry-failed` will re-attempt them
-  but they are not expected to come back.
+  but they are not expected to come back. `deck_candidates()` skips any row
+  carrying an `embedding_error` (see `0005_skip_dead_images.sql`), so these
+  never reach the deck: there is nothing to look at on such a card, and since
+  the deck excludes anything already swiped, the only way past one used to be
+  to record a swipe that means nothing and can't be taken back.
 
 Measured quality at full coverage: anchoring on two Chinese ink handscrolls
 returns six East Asian handscroll paintings (Japanese Edo, Muromachi, Chinese
