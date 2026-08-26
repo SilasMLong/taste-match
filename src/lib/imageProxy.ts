@@ -22,7 +22,18 @@ const PROXIED_HOSTS = new Set([
 // passing the remote URL through a query string: an open proxy that fetches
 // any URL a caller hands it is an SSRF hole, and the id makes the set of
 // fetchable URLs exactly "rows in our own images table".
-export function displayUrl(image: { id: string; image_url: string }): string {
+export function displayUrl(image: {
+  id: string;
+  image_url: string;
+  mirror_url?: string | null;
+}): string {
+  // A mirrored copy wins outright: it is already the downscaled WebP the proxy
+  // would have produced, served from a CDN with no function invocation and no
+  // dependence on whether the museum's host will talk to us today. This is the
+  // only thing that works for hosts refusing datacenter networks, where the
+  // proxy fetch is blocked exactly as the browser would be.
+  if (image.mirror_url) return image.mirror_url;
+
   let host: string;
   try {
     host = new URL(image.image_url).host;

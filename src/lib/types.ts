@@ -35,6 +35,10 @@ export interface ImageRecord {
   image_url: string;
   tags: string[];
   created_at: string;
+  // Set when we host the image ourselves instead of hotlinking the museum
+  // (0007_mirrored_images.sql). Null means "load image_url as before". This one
+  // deliberately DOES reach the browser -- displayUrl() needs it.
+  mirror_url?: string | null;
   // V3 columns (0004_embeddings.sql). Server-side only -- see ClientImage.
   // pgvector hands these back as a text literal ("[0.1,-0.2,...]"), not an
   // array, which is why the type isn't number[].
