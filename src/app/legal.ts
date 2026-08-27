@@ -10,7 +10,9 @@
 export const CONTACT_EMAIL = "REPLACE_ME@googlegroups.com";
 
 export const SITE_NAME = "Taste Match";
-export const SITE_URL = "https://taste-match-lilac.vercel.app";
+// The canonical origin. Vercel keeps serving the .vercel.app address too, but
+// this is the one to use in metadata, OAuth configuration and anything shared.
+export const SITE_URL = "https://tastematch.studio";
 
 // Bump when the substance changes, not for typo fixes.
 export const LAST_UPDATED = "26 August 2026";

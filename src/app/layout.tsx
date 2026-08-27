@@ -1,10 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { SITE_URL } from "./legal";
 
 export const metadata: Metadata = {
+  // Without this, relative URLs in metadata resolve against localhost in
+  // development and against the deployment URL in production -- so anything
+  // shared would carry whichever Vercel preview built it.
+  metadataBase: new URL(SITE_URL),
   title: "Taste Match",
   description: "Build visual taste through repeated exposure to art.",
+  openGraph: {
+    title: "Taste Match",
+    description: "Build visual taste through repeated exposure to art.",
+    url: SITE_URL,
+    siteName: "Taste Match",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
