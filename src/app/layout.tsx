@@ -39,6 +39,17 @@ export default function RootLayout({
             </nav>
           </header>
           <main className="flex flex-1 flex-col">{children}</main>
+          {/* Discreet, but present on every page: Google's OAuth consent screen
+              requires a reachable privacy policy and terms of service, and a
+              site that stores anything should link them anyway. */}
+          <footer className="flex items-center justify-center gap-5 px-6 py-6 text-xs text-muted">
+            <Link href="/privacy" className="transition-colors hover:text-foreground">
+              Privacy
+            </Link>
+            <Link href="/terms" className="transition-colors hover:text-foreground">
+              Terms
+            </Link>
+          </footer>
         </div>
       </body>
     </html>
