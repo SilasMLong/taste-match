@@ -25,6 +25,8 @@ export async function GET() {
       .from("swipes")
       .select("liked, category, culture, medium, tags")
       .eq("user_id", userId)
+      // Swipes on images that never rendered carry no preference.
+      .eq("image_failed", false)
       .order("id")
   );
   if (error) {

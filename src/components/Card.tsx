@@ -14,7 +14,15 @@ function caption(image: ImageRecord): string {
 
 type LoadState = "loading" | "loaded" | "error";
 
-export default function Card({ image }: { image: ImageRecord }) {
+export default function Card({
+  image,
+  onFailed,
+}: {
+  image: ImageRecord;
+  // Called once if the image never renders. The deck uses this to record the
+  // swipe as unrated -- you can't dislike something you never saw.
+  onFailed?: () => void;
+}) {
   // Cards are keyed by image id in the stack, so this resets per image without
   // needing an effect to clear it.
   const [state, setState] = useState<LoadState>("loading");
@@ -53,7 +61,10 @@ export default function Card({ image }: { image: ImageRecord }) {
           // this was set.
           referrerPolicy="no-referrer"
           onLoad={() => setState("loaded")}
-          onError={() => setState("error")}
+          onError={() => {
+            setState("error");
+            onFailed?.();
+          }}
           className={`max-h-full max-w-full select-none object-contain transition-opacity duration-200 ${
             state === "loaded" ? "opacity-100" : "opacity-0"
           }`}

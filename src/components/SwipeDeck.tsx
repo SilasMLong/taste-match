@@ -18,6 +18,14 @@ const STACK_DEPTH = 3;
 // architecture images take a second or more to arrive. Warming the next few
 // means the browser already holds them by the time they're shown.
 const PRELOAD_AHEAD = 4;
+// The five category bubbles are hidden for now. Three of the five had nothing
+// worth browsing: Products and Furniture have zero images and never had a
+// working source, and Architecture is a single German museum's drawings. Fine
+// Art is the only well-stocked group, so the filter mostly offered dead ends.
+// The filtering itself still works end to end -- /api/deck's category_group
+// parameter, categoryGroups.ts and the SQL all stay -- so this is one flag to
+// flip once there is a reason to browse by category again.
+const SHOW_CATEGORY_FILTERS = false;
 
 type PendingAction = "like" | "pass" | null;
 
@@ -31,11 +39,11 @@ async function fetchDeck(group: CategoryGroup | null): Promise<ImageRecord[]> {
   return data.images as ImageRecord[];
 }
 
-function logSwipe(imageId: string, liked: boolean) {
+function logSwipe(imageId: string, liked: boolean, imageFailed: boolean) {
   fetch("/api/swipes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image_id: imageId, liked }),
+    body: JSON.stringify({ image_id: imageId, liked, image_failed: imageFailed }),
   }).catch(() => {
     // Best-effort: a dropped swipe just means that card won't count toward
     // a future session's recommendations. Not worth blocking or retrying in V1.
@@ -46,10 +54,12 @@ function SwipeableCard({
   image,
   pendingAction,
   onSwiped,
+  onFailed,
 }: {
   image: ImageRecord;
   pendingAction: PendingAction;
   onSwiped: (liked: boolean) => void;
+  onFailed?: () => void;
 }) {
   const x = useMotionValue(0);
   const rotate = useTransform(x, [-300, 300], [-12, 12]);
@@ -106,7 +116,7 @@ function SwipeableCard({
       >
         PASS
       </motion.span>
-      <Card image={image} />
+      <Card image={image} onFailed={onFailed} />
     </motion.div>
   );
 }
@@ -118,6 +128,9 @@ export default function SwipeDeck() {
   // null = the unfiltered "all categories" state -- no bubble highlighted.
   const [selectedGroup, setSelectedGroup] = useState<CategoryGroup | null>(null);
   const seenIds = useRef<Set<string>>(new Set());
+  // Images whose <img> fired onError. Kept in a ref rather than state: it never
+  // affects rendering, it is only read at swipe time.
+  const failedIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetchDeck(selectedGroup)
@@ -145,7 +158,7 @@ export default function SwipeDeck() {
   const handleSwiped = (liked: boolean) => {
     const top = deck[0];
     if (!top) return;
-    logSwipe(top.id, liked);
+    logSwipe(top.id, liked, failedIds.current.has(top.id));
     setDeck((prev) => prev.slice(1));
     setPendingAction(null);
   };
@@ -169,7 +182,7 @@ export default function SwipeDeck() {
     setSelectedGroup((prev) => (prev === group ? null : group));
   };
 
-  const groupBubbles = (
+  const groupBubbles = !SHOW_CATEGORY_FILTERS ? null : (
     <div className="flex flex-wrap items-center justify-center gap-2 px-6 pt-6">
       {CATEGORY_GROUPS.map((group) => {
         const active = selectedGroup === group.key;
@@ -277,9 +290,10 @@ export default function SwipeDeck() {
                   image={image}
                   pendingAction={pendingAction}
                   onSwiped={handleSwiped}
+                  onFailed={() => failedIds.current.add(image.id)}
                 />
               ) : (
-                <Card image={image} />
+                <Card image={image} onFailed={() => failedIds.current.add(image.id)} />
               )}
             </div>
           ))

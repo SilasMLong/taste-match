@@ -5,7 +5,7 @@ import type { ImageRecord } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { image_id, liked } = body ?? {};
+  const { image_id, liked, image_failed } = body ?? {};
 
   // Whose swipe this is comes from the server. A `user_id` in the body is
   // ignored -- honouring it would let anyone write into another person's
@@ -39,6 +39,10 @@ export async function POST(request: NextRequest) {
         user_id: userId,
         image_id,
         liked,
+        // The row is still written even when the image never rendered, so the
+        // deck stops offering it; this flag is what keeps it out of the taste
+        // profile. See 0008_unrated_failed_swipes.sql.
+        image_failed: image_failed === true,
         category: image.category,
         culture: image.culture,
         medium: image.medium,
