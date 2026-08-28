@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { randomUUID } from "node:crypto";
+import { authConfigured, createServerSupabase } from "./supabaseAuth";
 
 // Who the current request belongs to, decided by the server.
 //
@@ -33,6 +34,17 @@ export type Viewer = {
   isAnonymous: boolean;
 };
 
+/** The anonymous id on this request, if there is one. Null once signed in. */
+export async function getAnonymousId(): Promise<string | null> {
+  const existing = (await cookies()).get(ANON_COOKIE)?.value;
+  return existing && ANON_ID_RE.test(existing) ? existing : null;
+}
+
+/** Called after a successful sign-in, once the anonymous history has been claimed. */
+export async function clearAnonymousId(): Promise<void> {
+  (await cookies()).delete(ANON_COOKIE);
+}
+
 /**
  * Resolves the viewer for the current request, minting an anonymous identity if
  * there isn't one yet.
@@ -41,11 +53,18 @@ export type Viewer = {
  * cookie, and Next does not allow that during Server Component rendering.
  */
 export async function getViewer(): Promise<Viewer> {
+  // A verified session wins over the anonymous cookie. getUser() checks the
+  // token with Supabase rather than trusting what the cookie asserts, which is
+  // the difference between an identity and a claim.
+  if (authConfigured()) {
+    const supabase = await createServerSupabase();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) return { userId: user.id, isAnonymous: false };
+  }
+
   const store = await cookies();
-
-  // Phase 3 inserts the Supabase session check here, ahead of the anonymous
-  // fallback, so a signed-in request resolves to its account id instead.
-
   const existing = store.get(ANON_COOKIE)?.value;
   if (existing && ANON_ID_RE.test(existing)) {
     return { userId: existing, isAnonymous: true };

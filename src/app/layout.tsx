@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { SITE_URL } from "./legal";
+import { authConfigured, createServerSupabase } from "@/lib/supabaseAuth";
 
 export const metadata: Metadata = {
   // Without this, relative URLs in metadata resolve against localhost in
@@ -19,11 +20,22 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Read-only here. getViewer() is not used because it may mint a cookie, and
+  // Server Components cannot set one -- the layout only needs to know whether
+  // to offer "Sign in" or "Sign out".
+  let signedIn = false;
+  if (authConfigured()) {
+    const supabase = await createServerSupabase();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    signedIn = Boolean(user);
+  }
   return (
     <html lang="en">
       <body>
@@ -48,6 +60,25 @@ export default function RootLayout({
               >
                 Liked
               </Link>
+              {signedIn ? (
+                // A form, because signing out is a POST -- a plain link can be
+                // triggered by anything that prefetches it.
+                <form action="/auth/signout" method="post">
+                  <button
+                    type="submit"
+                    className="text-sm text-muted transition-colors hover:text-foreground"
+                  >
+                    Sign out
+                  </button>
+                </form>
+              ) : (
+                <Link
+                  href="/signin"
+                  className="text-sm text-muted transition-colors hover:text-foreground"
+                >
+                  Sign in
+                </Link>
+              )}
             </nav>
           </header>
           <main className="flex flex-1 flex-col">{children}</main>
